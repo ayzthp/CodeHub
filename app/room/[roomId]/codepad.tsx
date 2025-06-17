@@ -1,351 +1,275 @@
-'use client';
+"use client";
 
-import { useEffect, useRef, useState } from "react";
-import { useAuth } from '@/hooks/useAuth';
-import { db } from '@/lib/firebase';
-import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
-import dynamic from 'next/dynamic';
-import axios from 'axios';
-import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Play, Loader2, Crown, Users, Mic, MicOff, Volume2, VolumeX } from 'lucide-react';
-import { toast } from 'sonner';
+import { useState, useEffect, useRef } from "react";
+import { useParams } from "next/navigation";
+import { doc, onSnapshot, updateDoc, serverTimestamp } from "firebase/firestore";
+import { db } from "@/lib/firebase";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { 
+  Crown, 
+  MicOff, 
+  Volume2, 
+  VolumeX,
+  Loader2
+} from "lucide-react";
 
-// Dynamically import Monaco Editor to avoid SSR issues
-const MonacoEditor = dynamic(
-  () => import('@monaco-editor/react'),
-  { ssr: false }
-);
+interface Participant {
+  uid: string;
+  name: string;
+  isHost: boolean;
+  hasWriteAccess: boolean;
+  isMuted: boolean;
+  isTyping: boolean;
+  lastSeen: unknown;
+}
 
-const LANGUAGES = [
-  { id: 54, name: "C++", monaco: "cpp", template: "#include <iostream>\nusing namespace std;\n\nint main() {\n    cout << \"Hello, World!\" << endl;\n    return 0;\n}" },
-  { id: 62, name: "Java", monaco: "java", template: "public class Main {\n    public static void main(String[] args) {\n        System.out.println(\"Hello, World!\");\n    }\n}" },
-  { id: 71, name: "Python", monaco: "python", template: "print(\"Hello, World!\")\n" },
-  { id: 63, name: "JavaScript", monaco: "javascript", template: "console.log(\"Hello, World!\");\n" },
-  { id: 50, name: "C", monaco: "c", template: "#include <stdio.h>\n\nint main() {\n    printf(\"Hello, World!\\n\");\n    return 0;\n}" },
-  { id: 51, name: "C#", monaco: "csharp", template: "using System;\n\nclass Program {\n    static void Main() {\n        Console.WriteLine(\"Hello, World!\");\n    }\n}" },
-];
+interface RoomData {
+  id: string;
+  name: string;
+  hostId: string;
+  participants: Participant[];
+  code: string;
+  language: string;
+  createdAt: unknown;
+  updatedAt: unknown;
+}
 
-export default function SharedCodeEditor({ 
-  roomId, 
-  onCodeChange, 
-  onLanguageChange 
-}: { 
-  roomId: string;
-  onCodeChange?: (code: string) => void;
-  onLanguageChange?: (language: any) => void;
-}) {
-  const { user } = useAuth();
-  const [isEditor, setIsEditor] = useState(false);
-  const [isHost, setIsHost] = useState(false);
-  const [roomData, setRoomData] = useState<any>(null);
-  const [code, setCode] = useState("// Welcome to the collaborative code editor!\n// Start coding with your team...\n\nfunction hello() {\n  console.log('Hello, World!');\n}\n\nhello();");
-  const [selectedLanguage, setSelectedLanguage] = useState(LANGUAGES[3]); // JavaScript by default
-  const [participantCount, setParticipantCount] = useState(1);
-  const [isTyping, setIsTyping] = useState(false);
-  const [lastTypingTime, setLastTypingTime] = useState(0);
-  const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
+export default function Codepad() {
+  const params = useParams();
+  const roomId = params.roomId as string;
   
-  // Refs for debouncing
-  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const lastCodeUpdateRef = useRef<string>("");
+  const [code, setCode] = useState("");
+  const [language, setLanguage] = useState("javascript");
+  const [participants, setParticipants] = useState<Participant[]>([]);
+  const [isHost, setIsHost] = useState(false);
+  const [hasWriteAccess, setHasWriteAccess] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Debug initial state
-  console.log('🎯 Initial component state:', {
-    roomId,
-    userId: user?.uid,
-    initialCode: code.substring(0, 50) + '...',
-    selectedLanguage: selectedLanguage.name
-  });
+  const debounceTimeout = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
-    if (!user || !roomId) return;
+    if (!roomId) return;
 
-    console.log('🔍 Setting up real-time listener for room:', roomId);
-    console.log('👤 Current user:', user.uid);
-    console.log('🔧 User display name:', user.displayName);
-    console.log('📧 User email:', user.email);
-    
-    // Listen to room data for editor permissions and real-time code changes
-    const roomRef = doc(db, 'rooms', roomId);
-    const unsubscribe = onSnapshot(roomRef, (doc) => {
+    const unsubscribe = onSnapshot(doc(db, "rooms", roomId), (doc) => {
       if (doc.exists()) {
-        const data = doc.data();
-        console.log('📡 Real-time update received:', {
-          title: data.title,
-          hostId: data.hostId,
-          currentEditor: data.currentEditor,
-          participants: Object.keys(data.participants || {}),
-          hasCurrentCode: !!data.currentCode,
-          currentCodeLength: data.currentCode?.length || 0
-        });
+        const roomData = doc.data() as RoomData;
+        setCode(roomData.code || "");
+        setLanguage(roomData.language || "javascript");
+        setParticipants(roomData.participants || []);
         
-        setRoomData(data);
-        setIsEditor(user.uid === data.currentEditor);
-        setIsHost(user.uid === data.hostId);
-        setParticipantCount(Object.keys(data.participants || {}).length);
+        // Check if current user is host or has write access
+        const currentUser = roomData.participants?.find(p => p.uid === "current-user-id");
+        setIsHost(currentUser?.isHost || false);
+        setHasWriteAccess(currentUser?.hasWriteAccess || false);
         
-        console.log('👑 User permissions:', {
-          isEditor: user.uid === data.currentEditor,
-          isHost: user.uid === data.hostId,
-          currentEditor: data.currentEditor,
-          userUid: user.uid
-        });
-        
-        // Update code from Firestore if it's different from local state
-        if (data.currentCode && data.currentCode !== lastCodeUpdateRef.current) {
-          console.log('🔄 Updating code from Firestore:', data.currentCode.substring(0, 50) + '...');
-          setCode(data.currentCode);
-          lastCodeUpdateRef.current = data.currentCode;
-          setLastSyncTime(new Date());
-        } else if (data.currentCode) {
-          console.log('⏭️ Code exists but unchanged, skipping update');
-        } else {
-          console.log('⚠️ No currentCode in Firestore');
-        }
-        
-        // Update language if changed
-        if (data.currentLanguage) {
-          const language = LANGUAGES.find(lang => lang.monaco === data.currentLanguage);
-          if (language) {
-            console.log('🌐 Language changed to:', language.name);
-            setSelectedLanguage(language);
-            setLastSyncTime(new Date());
-          }
-        }
-        
-        // Update output if someone else executed code
-        if (data.lastExecution && data.lastExecution.output) {
-          console.log('📤 Updating output from execution:', data.lastExecution.output.substring(0, 50) + '...');
-          setLastSyncTime(new Date());
-        }
-      } else {
-        console.log('❌ Room not found in Firestore');
+        setIsLoading(false);
       }
-    }, (error) => {
-      console.error('🔥 Firestore listener error:', error);
     });
 
-    return () => {
-      console.log('🔌 Cleaning up real-time listener');
-      unsubscribe();
-    };
-  }, [user, roomId]);
+    return () => unsubscribe();
+  }, [roomId]);
 
-  // Debounced function to update code in Firestore
-  const debouncedUpdateCode = (newCode: string) => {
-    console.log('⌨️ Code change detected, debouncing update...');
-    
-    if (typingTimeoutRef.current) {
-      clearTimeout(typingTimeoutRef.current);
-    }
-    
-    typingTimeoutRef.current = setTimeout(() => {
-      if (newCode !== lastCodeUpdateRef.current) {
-        console.log('📤 Sending code update to Firestore:', newCode.substring(0, 50) + '...');
-        updateDoc(doc(db, 'rooms', roomId), {
-          currentCode: newCode,
-          lastUpdated: new Date(),
-          lastUpdatedBy: user?.uid
-        }).then(() => {
-          console.log('✅ Code update sent successfully');
-        }).catch((error) => {
-          console.error('❌ Failed to update code:', error);
-        });
-        lastCodeUpdateRef.current = newCode;
-        setIsTyping(false);
-      } else {
-        console.log('⏭️ Skipping update - code unchanged');
-      }
-    }, 300); // 300ms debounce
-  };
+  const updateCode = async (newCode: string) => {
+    if (!roomId || !hasWriteAccess) return;
 
-  const handleEditorChange = (value: string | undefined) => {
-    if (value !== undefined) {
-      console.log('✏️ Editor change detected, isEditor:', isEditor);
-      setCode(value);
-      onCodeChange?.(value);
-      
-      // Only update Firestore if user is the current editor
-      if (isEditor) {
-        console.log('👑 User is editor, updating Firestore...');
-        setIsTyping(true);
-        setLastTypingTime(Date.now());
-        debouncedUpdateCode(value);
-      } else {
-        console.log('👁️ User is not editor, skipping update');
-      }
-    }
-  };
-
-  const handleLanguageChange = (languageId: string) => {
-    const language = LANGUAGES.find(lang => lang.id.toString() === languageId);
-    if (language && isEditor) {
-      setSelectedLanguage(language);
-      setCode(language.template);
-      onLanguageChange?.(language);
-      
-      // Update language and code in Firestore
-      updateDoc(doc(db, 'rooms', roomId), {
-        currentLanguage: language.monaco,
-        currentCode: language.template,
-        lastUpdated: new Date(),
-        lastUpdatedBy: user?.uid
-      }).catch(console.error);
-      
-      lastCodeUpdateRef.current = language.template;
-      setLastSyncTime(new Date());
-    }
-  };
-
-  const transferEditorControl = async (userId: string) => {
-    if (!isHost) return;
-    
     try {
-      await updateDoc(doc(db, 'rooms', roomId), {
-        currentEditor: userId
+      await updateDoc(doc(db, "rooms", roomId), {
+        code: newCode,
+        updatedAt: serverTimestamp(),
       });
-      toast.success('Editor control transferred!');
     } catch (error) {
-      console.error('Error transferring editor control:', error);
-      toast.error('Failed to transfer editor control');
+      console.error("Error updating code:", error);
     }
   };
 
-  const muteUser = async (userId: string) => {
-    if (!isHost) return;
-    
+  const updateLanguage = async (newLanguage: string) => {
+    if (!roomId || !hasWriteAccess) return;
+
     try {
-      await updateDoc(doc(db, 'rooms', roomId), {
-        [`participants.${userId}.muted`]: true
+      await updateDoc(doc(db, "rooms", roomId), {
+        language: newLanguage,
+        updatedAt: serverTimestamp(),
       });
-      toast.success('User muted!');
     } catch (error) {
-      console.error('Error muting user:', error);
-      toast.error('Failed to mute user');
+      console.error("Error updating language:", error);
     }
   };
 
-  const unmuteUser = async (userId: string) => {
-    if (!isHost) return;
+  const handleCodeChange = (newCode: string) => {
+    setCode(newCode);
     
+    // Clear existing timeout
+    if (debounceTimeout.current) {
+      clearTimeout(debounceTimeout.current);
+    }
+    
+    // Debounce the update
+    debounceTimeout.current = setTimeout(() => {
+      updateCode(newCode);
+    }, 500);
+  };
+
+  const handleLanguageChange = (newLanguage: string) => {
+    setLanguage(newLanguage);
+    updateLanguage(newLanguage);
+  };
+
+  const assignWriteAccess = async (participantId: string) => {
+    if (!roomId || !isHost) return;
+
     try {
-      await updateDoc(doc(db, 'rooms', roomId), {
-        [`participants.${userId}.muted`]: false
+      const updatedParticipants = participants.map(p => ({
+        ...p,
+        hasWriteAccess: p.uid === participantId
+      }));
+
+      await updateDoc(doc(db, "rooms", roomId), {
+        participants: updatedParticipants,
+        updatedAt: serverTimestamp(),
       });
-      toast.success('User unmuted!');
     } catch (error) {
-      console.error('Error unmuting user:', error);
-      toast.error('Failed to unmute user');
+      console.error("Error assigning write access:", error);
     }
   };
+
+  const muteUser = async (participantId: string) => {
+    if (!roomId || !isHost) return;
+
+    try {
+      const updatedParticipants = participants.map(p => ({
+        ...p,
+        isMuted: p.uid === participantId ? true : p.isMuted
+      }));
+
+      await updateDoc(doc(db, "rooms", roomId), {
+        participants: updatedParticipants,
+        updatedAt: serverTimestamp(),
+      });
+    } catch (error) {
+      console.error("Error muting user:", error);
+    }
+  };
+
+  const unmuteUser = async (participantId: string) => {
+    if (!roomId || !isHost) return;
+
+    try {
+      const updatedParticipants = participants.map(p => ({
+        ...p,
+        isMuted: p.uid === participantId ? false : p.isMuted
+      }));
+
+      await updateDoc(doc(db, "rooms", roomId), {
+        participants: updatedParticipants,
+        updatedAt: serverTimestamp(),
+      });
+    } catch (error) {
+      console.error("Error unmuting user:", error);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="h-8 w-8 animate-spin" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h3 className="text-lg font-semibold text-gray-900">Collaborative Code Editor</h3>
-        <div className="flex items-center space-x-2">
-          <span className="px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded-full">
-            👥 {participantCount} Online
-          </span>
-          {isHost && (
-            <span className="px-2 py-1 text-xs bg-yellow-100 text-yellow-800 rounded-full flex items-center">
-              <Crown className="h-3 w-3 mr-1" />
-              Host
-            </span>
-          )}
-          {isEditor ? (
-            <span className="px-2 py-1 text-xs bg-green-100 text-green-800 rounded-full">
-              ✏️ Can Edit
-            </span>
-          ) : (
-            <span className="px-2 py-1 text-xs bg-gray-100 text-gray-800 rounded-full">
-              👁️ View Only
-            </span>
-          )}
-          {isTyping && (
-            <span className="px-2 py-1 text-xs bg-orange-100 text-orange-800 rounded-full animate-pulse">
-              ✍️ Typing...
-            </span>
-          )}
-          {lastSyncTime && (
-            <span className="px-2 py-1 text-xs bg-green-100 text-green-800 rounded-full">
-              🔄 Synced {lastSyncTime.toLocaleTimeString()}
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* Language Selection and Run Button */}
+      {/* Language Selector */}
       <div className="flex items-center space-x-4">
-        <div className="flex items-center space-x-2">
-          <label className="text-sm font-medium text-gray-700">Language:</label>
-          <Select value={selectedLanguage.id.toString()} onValueChange={handleLanguageChange}>
-            <SelectTrigger className="w-32">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {LANGUAGES.map((language) => (
-                <SelectItem key={language.id} value={language.id.toString()}>
-                  {language.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        
-        <Button 
-          onClick={() => {
-            console.log('🧪 Testing real-time sync...');
-            const testCode = `// Test sync at ${new Date().toLocaleTimeString()}\nconsole.log('Real-time sync test!');`;
-            updateDoc(doc(db, 'rooms', roomId), {
-              currentCode: testCode,
-              lastUpdated: new Date(),
-              lastUpdatedBy: user?.uid
-            }).then(() => {
-              console.log('✅ Test update sent');
-              toast.success('Test update sent!');
-            }).catch((error) => {
-              console.error('❌ Test update failed:', error);
-              toast.error('Test update failed');
-            });
-          }}
-          variant="outline"
-          size="sm"
+        <label className="text-sm font-medium">Language:</label>
+        <select
+          value={language}
+          onChange={(e) => handleLanguageChange(e.target.value)}
+          disabled={!hasWriteAccess}
+          className="px-3 py-1 border rounded-md text-sm"
         >
-          🧪 Test Sync
-        </Button>
+          <option value="javascript">JavaScript</option>
+          <option value="python">Python</option>
+          <option value="java">Java</option>
+          <option value="cpp">C++</option>
+          <option value="c">C</option>
+        </select>
+        
+        {!hasWriteAccess && (
+          <Badge variant="secondary" className="ml-2">
+            Read Only
+          </Badge>
+        )}
       </div>
 
-      {/* Code Editor - Full height */}
-      <div className="h-[calc(100vh-300px)] w-full border rounded-xl shadow-lg overflow-hidden">
-        <MonacoEditor
-          height="100%"
-          language={selectedLanguage.monaco}
-          theme="vs-dark"
+      {/* Code Editor */}
+      <div className="border rounded-lg overflow-hidden">
+        <textarea
           value={code}
-          onChange={handleEditorChange}
-          options={{
-            readOnly: !isEditor,
-            minimap: { enabled: true },
-            fontSize: 14,
-            lineNumbers: "on",
-            roundedSelection: false,
-            scrollBeyondLastLine: false,
-            cursorStyle: "line",
-            automaticLayout: true,
-            contextmenu: true,
-            mouseWheelZoom: true,
-            quickSuggestions: true,
-            suggestOnTriggerCharacters: true,
-            acceptSuggestionOnEnter: "on",
-            tabCompletion: "on",
-            wordBasedSuggestions: "currentDocument",
-          }}
+          onChange={(e) => handleCodeChange(e.target.value)}
+          disabled={!hasWriteAccess}
+          className="w-full h-96 p-4 font-mono text-sm bg-gray-50 border-0 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+          placeholder="Start coding here..."
         />
       </div>
+
+      {/* Participants */}
+      <div className="flex items-center space-x-4">
+        <span className="text-sm font-medium">Participants:</span>
+        {participants.map((participant) => (
+          <div key={participant.uid} className="flex items-center space-x-2">
+            <span className="text-sm">
+              {participant.name}
+              {participant.isHost && <Crown className="inline h-3 w-3 ml-1" />}
+            </span>
+            {participant.hasWriteAccess && (
+              <Badge variant="default" className="text-xs">
+                Writing
+              </Badge>
+            )}
+            {participant.isMuted && (
+              <MicOff className="h-3 w-3 text-red-500" />
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* Host Controls */}
+      {isHost && (
+        <div className="flex items-center space-x-4">
+          <span className="text-sm font-medium">Host Controls:</span>
+          {participants.map((participant) => (
+            <div key={participant.uid} className="flex items-center space-x-2">
+              <span className="text-sm">{participant.name}</span>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => assignWriteAccess(participant.uid)}
+                disabled={participant.hasWriteAccess}
+              >
+                Give Write Access
+              </Button>
+              {participant.isMuted ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => unmuteUser(participant.uid)}
+                >
+                  <Volume2 className="h-3 w-3" />
+                </Button>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => muteUser(participant.uid)}
+                >
+                  <VolumeX className="h-3 w-3" />
+                </Button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 } 

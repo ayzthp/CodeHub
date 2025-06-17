@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { doc, updateDoc, arrayUnion, arrayRemove, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/hooks/useAuth';
@@ -54,17 +54,7 @@ export default function ContestsPage() {
   const [selectedPlatform, setSelectedPlatform] = useState<string>('all');
   const [isUsingMockData, setIsUsingMockData] = useState(false);
 
-  useEffect(() => {
-    const loadData = async () => {
-      await fetchContests();
-      if (user) {
-        await fetchUserReminders();
-      }
-    };
-    loadData();
-  }, [user]);
-
-  const fetchContests = async () => {
+  const fetchContests = useCallback(async () => {
     setIsLoading(true);
     try {
       const response = await fetch('/api/contests');
@@ -87,9 +77,9 @@ export default function ContestsPage() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
 
-  const fetchUserReminders = async () => {
+  const fetchUserReminders = useCallback(async () => {
     if (!user) return;
     
     try {
@@ -101,7 +91,17 @@ export default function ContestsPage() {
     } catch (error) {
       console.error('Error fetching user reminders:', error);
     }
-  };
+  }, [user]);
+
+  useEffect(() => {
+    const loadData = async () => {
+      await fetchContests();
+      if (user) {
+        await fetchUserReminders();
+      }
+    };
+    loadData();
+  }, [user, fetchUserReminders, fetchContests]);
 
   const toggleReminder = async (contestName: string) => {
     if (!user) {

@@ -70,7 +70,7 @@ function WhiteboardComponent() {
     ctx.lineJoin = "round";
     ctx.strokeStyle = selectedColor;
     ctx.lineWidth = brushThickness;
-  }, []);
+  }, [selectedColor, brushThickness]);
 
   const getCanvasCoordinates = (e: React.MouseEvent): { x: number; y: number } => {
     const canvas = canvasRef.current;
