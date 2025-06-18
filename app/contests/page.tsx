@@ -20,7 +20,6 @@ import {
   ArrowLeft,
   Target,
   Users,
-
   Timer,
   Globe,
   Code,
@@ -80,7 +79,7 @@ export default function ContestsPage() {
   }, []);
 
   const fetchUserReminders = useCallback(async () => {
-    if (!user) return;
+    if (!user || !db) return;
     
     try {
       const userDoc = await getDoc(doc(db, 'users', user.uid));
@@ -104,7 +103,7 @@ export default function ContestsPage() {
   }, [user, fetchUserReminders, fetchContests]);
 
   const toggleReminder = async (contestName: string) => {
-    if (!user) {
+    if (!user || !db) {
       toast.error('Please login to set reminders');
       return;
     }

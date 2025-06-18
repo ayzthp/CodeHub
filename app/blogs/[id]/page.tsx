@@ -62,7 +62,7 @@ export default function BlogPostPage() {
 
   useEffect(() => {
     const loadPost = async () => {
-      if (!params.id) return;
+      if (!params.id || !db) return;
       
       setIsLoading(true);
       try {
@@ -102,10 +102,8 @@ export default function BlogPostPage() {
     loadPost();
   }, [params.id, user, router]);
 
-
-
   const handleUpvote = async () => {
-    if (!user) {
+    if (!user || !db) {
       toast.error('Please login to upvote posts');
       return;
     }
@@ -148,7 +146,7 @@ export default function BlogPostPage() {
   };
 
   const handleSubmitComment = async () => {
-    if (!user) {
+    if (!user || !db) {
       toast.error('Please login to comment');
       return;
     }

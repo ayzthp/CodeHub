@@ -40,7 +40,7 @@ export default function HostControlPanel({ roomId, roomData, isHost }: HostContr
   if (!isHost) return null;
 
   const muteUser = async (participantId: string) => {
-    if (!isHost) return;
+    if (!isHost || !db) return;
     setIsUpdating(participantId);
     try {
       const updatedParticipants = roomData.participants.map(p => ({
@@ -59,7 +59,7 @@ export default function HostControlPanel({ roomId, roomData, isHost }: HostContr
   };
 
   const unmuteUser = async (participantId: string) => {
-    if (!isHost) return;
+    if (!isHost || !db) return;
     setIsUpdating(participantId);
     try {
       const updatedParticipants = roomData.participants.map(p => ({

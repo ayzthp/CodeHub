@@ -24,17 +24,6 @@ interface Participant {
   lastSeen: unknown;
 }
 
-interface RoomData {
-  id: string;
-  name: string;
-  hostId: string;
-  participants: Participant[];
-  code: string;
-  language: string;
-  createdAt: unknown;
-  updatedAt: unknown;
-}
-
 export default function Codepad() {
   const params = useParams();
   const roomId = params.roomId as string;
@@ -49,17 +38,17 @@ export default function Codepad() {
   const debounceTimeout = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
-    if (!roomId) return;
-
-    const unsubscribe = onSnapshot(doc(db, "rooms", roomId), (doc) => {
+    if (!db) return;
+    
+    const unsubscribe = onSnapshot(doc(db!, 'rooms', roomId), (doc) => {
       if (doc.exists()) {
-        const roomData = doc.data() as RoomData;
-        setCode(roomData.code || "");
-        setLanguage(roomData.language || "javascript");
-        setParticipants(roomData.participants || []);
+        const data = doc.data();
+        setCode(data.code || '');
+        setLanguage(data.language || 'javascript');
+        setParticipants(data.participants || []);
         
         // Check if current user is host or has write access
-        const currentUser = roomData.participants?.find(p => p.uid === "current-user-id");
+        const currentUser = data.participants?.find((p: Participant) => p.uid === "current-user-id");
         setIsHost(currentUser?.isHost || false);
         setHasWriteAccess(currentUser?.hasWriteAccess || false);
         
@@ -71,10 +60,10 @@ export default function Codepad() {
   }, [roomId]);
 
   const updateCode = async (newCode: string) => {
-    if (!roomId || !hasWriteAccess) return;
+    if (!roomId || !hasWriteAccess || !db) return;
 
     try {
-      await updateDoc(doc(db, "rooms", roomId), {
+      await updateDoc(doc(db!, "rooms", roomId), {
         code: newCode,
         updatedAt: serverTimestamp(),
       });
@@ -84,10 +73,10 @@ export default function Codepad() {
   };
 
   const updateLanguage = async (newLanguage: string) => {
-    if (!roomId || !hasWriteAccess) return;
+    if (!roomId || !hasWriteAccess || !db) return;
 
     try {
-      await updateDoc(doc(db, "rooms", roomId), {
+      await updateDoc(doc(db!, "rooms", roomId), {
         language: newLanguage,
         updatedAt: serverTimestamp(),
       });
@@ -116,7 +105,7 @@ export default function Codepad() {
   };
 
   const assignWriteAccess = async (participantId: string) => {
-    if (!roomId || !isHost) return;
+    if (!roomId || !isHost || !db) return;
 
     try {
       const updatedParticipants = participants.map(p => ({
@@ -124,7 +113,7 @@ export default function Codepad() {
         hasWriteAccess: p.uid === participantId
       }));
 
-      await updateDoc(doc(db, "rooms", roomId), {
+      await updateDoc(doc(db!, "rooms", roomId), {
         participants: updatedParticipants,
         updatedAt: serverTimestamp(),
       });
@@ -134,7 +123,7 @@ export default function Codepad() {
   };
 
   const muteUser = async (participantId: string) => {
-    if (!roomId || !isHost) return;
+    if (!roomId || !isHost || !db) return;
 
     try {
       const updatedParticipants = participants.map(p => ({
@@ -142,7 +131,7 @@ export default function Codepad() {
         isMuted: p.uid === participantId ? true : p.isMuted
       }));
 
-      await updateDoc(doc(db, "rooms", roomId), {
+      await updateDoc(doc(db!, "rooms", roomId), {
         participants: updatedParticipants,
         updatedAt: serverTimestamp(),
       });
@@ -152,7 +141,7 @@ export default function Codepad() {
   };
 
   const unmuteUser = async (participantId: string) => {
-    if (!roomId || !isHost) return;
+    if (!roomId || !isHost || !db) return;
 
     try {
       const updatedParticipants = participants.map(p => ({
@@ -160,7 +149,7 @@ export default function Codepad() {
         isMuted: p.uid === participantId ? false : p.isMuted
       }));
 
-      await updateDoc(doc(db, "rooms", roomId), {
+      await updateDoc(doc(db!, "rooms", roomId), {
         participants: updatedParticipants,
         updatedAt: serverTimestamp(),
       });

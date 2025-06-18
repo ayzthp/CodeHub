@@ -32,11 +32,15 @@ export default function CreateRoomPage() {
 
     setIsCreating(true);
     try {
+      // Check if Firebase is available
+      if (!db) {
+        throw new Error('Firebase is not initialized');
+      }
+
       // Generate unique room ID
       const roomId = `room_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       
-      // Create room document in Firestore
-      await setDoc(doc(db, 'rooms', roomId), {
+      const roomData = {
         id: roomId,
         title: formData.title.trim(),
         description: formData.description.trim(),
@@ -58,13 +62,15 @@ export default function CreateRoomPage() {
             role: 'host'
           }
         }
-      });
+      };
 
+      await setDoc(doc(db, 'rooms', roomId), roomData);
+      
       toast.success('Room created successfully!');
       router.push(`/room/${roomId}`);
     } catch (error) {
       console.error('Error creating room:', error);
-      toast.error('Failed to create room');
+      toast.error('Failed to create room. Please try again.');
     } finally {
       setIsCreating(false);
     }

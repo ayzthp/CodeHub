@@ -78,22 +78,23 @@ interface UserData {
 
 export default function DashboardPage() {
   const { user } = useAuth();
-  const router = useRouter();
   const [userData, setUserData] = useState<UserData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
+  const router = useRouter();
 
   useEffect(() => {
     const fetchUserData = async () => {
-      if (!user) return;
+      if (!user || !db) return;
       
       try {
         const userDoc = await getDoc(doc(db, 'users', user.uid));
         if (userDoc.exists()) {
-          setUserData(userDoc.data() as UserData);
+          const userData = userDoc.data() as UserData;
+          setUserData(userData);
         }
-      } catch {
-        toast.error('Failed to load user data');
+      } catch (error) {
+        console.error('Error fetching user data:', error);
       } finally {
         setIsLoading(false);
       }
@@ -103,6 +104,7 @@ export default function DashboardPage() {
   }, [user]);
 
   const handleLogout = async () => {
+    if (!auth) return;
     try {
       await signOut(auth);
       toast.success('Logged out successfully');
@@ -113,7 +115,7 @@ export default function DashboardPage() {
   };
 
   const handleSync = async () => {
-    if (!user || !userData) return;
+    if (!user || !userData || !db) return;
 
     setIsSyncing(true);
     try {

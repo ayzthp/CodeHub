@@ -26,12 +26,15 @@ export default function CollegeLeaderboardPage() {
   });
 
   useEffect(() => {
-    if (college) {
+    if (college && db) {
       fetchCollegeUsers();
     }
-  }, [college]); // eslint-disable-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [college]);
 
   const fetchCollegeUsers = async () => {
+    if (!college || !db) return;
+    
     setIsLoading(true);
     try {
       const usersRef = collection(db, 'users');

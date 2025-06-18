@@ -49,7 +49,7 @@ export default function RoomPage() {
   const [isRunning, setIsRunning] = useState(false);
 
   useEffect(() => {
-    if (!roomId) return;
+    if (!roomId || !db) return;
 
     const unsubscribe = onSnapshot(doc(db, "rooms", roomId), (doc) => {
       if (doc.exists()) {
@@ -67,7 +67,7 @@ export default function RoomPage() {
   }, [roomId, router]);
 
   const updateCode = async (newCode: string) => {
-    if (!roomId) return;
+    if (!roomId || !db) return;
 
     try {
       await updateDoc(doc(db, "rooms", roomId), {
@@ -80,7 +80,7 @@ export default function RoomPage() {
   };
 
   const updateLanguage = async (newLanguage: string) => {
-    if (!roomId) return;
+    if (!roomId || !db) return;
 
     try {
       await updateDoc(doc(db, "rooms", roomId), {

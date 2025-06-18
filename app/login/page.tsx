@@ -38,6 +38,7 @@ export default function LoginPage() {
   const onSubmit = async (data: LoginForm) => {
     setIsLoading(true);
     try {
+      if (!auth) return;
       await signInWithEmailAndPassword(auth, data.email, data.password);
       toast.success('Welcome back! Redirecting to dashboard...');
       router.push('/dashboard');

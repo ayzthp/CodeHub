@@ -33,44 +33,40 @@ export default function BlogsPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedTag, setSelectedTag] = useState('');
   const [sortBy, setSortBy] = useState<'newest' | 'popular' | 'trending'>('newest');
-  const [allTags, setAllTags] = useState<string[]>([]);
   const [isUpvoting, setIsUpvoting] = useState<string | null>(null);
 
+  const allTags = Array.from(new Set(blogs.flatMap(blog => blog.tags || [])));
+
   useEffect(() => {
-    const loadBlogs = async () => {
+    const fetchBlogs = async () => {
       setIsLoading(true);
       try {
+        if (!db) {
+          throw new Error('Firebase is not initialized');
+        }
+        
         const blogsRef = collection(db, 'blogs');
         const q = query(blogsRef, orderBy('createdAt', 'desc'));
         const snapshot = await getDocs(q);
         
-        const fetchedBlogs: BlogPost[] = [];
-        const tagsSet = new Set<string>();
-        
-        snapshot.forEach((docSnap) => {
-          const data = docSnap.data();
-          
-          const blog: BlogPost = {
-            id: docSnap.id,
+        const blogsData: BlogPost[] = snapshot.docs.map(doc => {
+          const data = doc.data();
+          return {
+            id: doc.id,
             title: data.title || '',
             content: data.content || '',
             authorId: data.authorId || '',
             authorName: data.authorName || 'Unknown Author',
-            createdAt: data.createdAt?.toDate() || new Date(),
+            createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(),
+            updatedAt: data.updatedAt?.toDate ? data.updatedAt.toDate() : undefined,
             tags: data.tags || [],
             upvotes: data.upvotes || 0,
             comments: data.comments || [],
-            isUpvoted: user ? data.upvoters?.includes(user.uid) : false,
+            isUpvoted: false,
           };
-          
-          fetchedBlogs.push(blog);
-          
-          // Collect all tags
-          blog.tags.forEach(tag => tagsSet.add(tag));
         });
-
-        setBlogs(fetchedBlogs);
-        setAllTags(Array.from(tagsSet).sort());
+        
+        setBlogs(blogsData);
       } catch (error) {
         console.error('Error fetching blogs:', error);
         toast.error('Failed to load blogs');
@@ -79,8 +75,8 @@ export default function BlogsPage() {
       }
     };
 
-    loadBlogs();
-  }, [user]);
+    fetchBlogs();
+  }, []);
 
   useEffect(() => {
     let filtered = [...blogs];
@@ -118,10 +114,8 @@ export default function BlogsPage() {
     setFilteredBlogs(filtered);
   }, [blogs, searchTerm, selectedTag, sortBy]);
 
-
-
   const handleUpvote = async (blogId: string) => {
-    if (!user) {
+    if (!user || !db) {
       toast.error('Please login to upvote posts');
       return;
     }

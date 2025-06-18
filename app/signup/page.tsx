@@ -55,6 +55,11 @@ export default function SignupPage() {
 
   const onSubmit = async (data: SignupForm) => {
     setIsLoading(true);
+    if (!auth || !db) {
+      toast.error("Internal error: Firebase not initialized.");
+      setIsLoading(false);
+      return;
+    }
     try {
       // Create Firebase user
       const userCredential = await createUserWithEmailAndPassword(auth, data.email, data.password);

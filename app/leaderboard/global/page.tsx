@@ -28,6 +28,7 @@ export default function GlobalLeaderboardPage() {
   const fetchUsers = async () => {
     setIsLoading(true);
     try {
+      if (!db) return;
       const usersRef = collection(db, 'users');
       const q = query(usersRef, orderBy('createdAt', 'desc'));
       const snapshot = await getDocs(q);
