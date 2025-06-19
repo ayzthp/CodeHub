@@ -62,7 +62,7 @@ export default function BlogPostPage() {
 
   useEffect(() => {
     const loadPost = async () => {
-      if (!params.id || !db) return;
+      if (!params || !params.id) return;
       
       setIsLoading(true);
       try {
@@ -100,10 +100,12 @@ export default function BlogPostPage() {
     };
 
     loadPost();
-  }, [params.id, user, router]);
+  }, [params?.id, user, router]);
+
+
 
   const handleUpvote = async () => {
-    if (!user || !db) {
+    if (!user) {
       toast.error('Please login to upvote posts');
       return;
     }
@@ -146,7 +148,7 @@ export default function BlogPostPage() {
   };
 
   const handleSubmitComment = async () => {
-    if (!user || !db) {
+    if (!user) {
       toast.error('Please login to comment');
       return;
     }

@@ -1,395 +1,202 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { collection, getDocs, query, orderBy, doc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
+import { useEffect, useState } from 'react';
+import { collection, getDocs, updateDoc, doc, arrayUnion, arrayRemove, query, orderBy } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { useAuth } from '@/hooks/useAuth';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
-import { Skeleton } from '@/components/ui/skeleton';
 import BlogCard, { BlogPost } from '@/components/BlogCard';
-import { 
-  BookOpen, 
-  PenTool, 
-  Search, 
-  Filter, 
-  Tag,
-  ArrowLeft,
-  Plus,
-  TrendingUp,
-  Clock,
-  Heart
-} from 'lucide-react';
+import { useAuth } from '@/hooks/useAuth';
+import { Button } from '@/components/ui/button';
 import Link from 'next/link';
-import { toast } from 'sonner';
+import { BookOpen, Plus, FileText, Lightbulb, AlertTriangle, Loader2 } from 'lucide-react';
 
 export default function BlogsPage() {
   const { user } = useAuth();
   const [blogs, setBlogs] = useState<BlogPost[]>([]);
-  const [filteredBlogs, setFilteredBlogs] = useState<BlogPost[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedTag, setSelectedTag] = useState('');
-  const [sortBy, setSortBy] = useState<'newest' | 'popular' | 'trending'>('newest');
-  const [isUpvoting, setIsUpvoting] = useState<string | null>(null);
-
-  const allTags = Array.from(new Set(blogs.flatMap(blog => blog.tags || [])));
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [upvotingId, setUpvotingId] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchBlogs = async () => {
-      setIsLoading(true);
+      setLoading(true);
+      setError(null);
       try {
-        if (!db) {
-          throw new Error('Firebase is not initialized');
-        }
-        
         const blogsRef = collection(db, 'blogs');
         const q = query(blogsRef, orderBy('createdAt', 'desc'));
         const snapshot = await getDocs(q);
-        
-        const blogsData: BlogPost[] = snapshot.docs.map(doc => {
-          const data = doc.data();
+        const fetchedBlogs: BlogPost[] = snapshot.docs.map((docSnap) => {
+          const data = docSnap.data();
           return {
-            id: doc.id,
+            id: docSnap.id,
             title: data.title || '',
             content: data.content || '',
             authorId: data.authorId || '',
             authorName: data.authorName || 'Unknown Author',
             createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(),
-            updatedAt: data.updatedAt?.toDate ? data.updatedAt.toDate() : undefined,
             tags: data.tags || [],
             upvotes: data.upvotes || 0,
-            comments: data.comments || [],
-            isUpvoted: false,
+            comments: (data.comments || []).map((comment: any) => ({
+              ...comment,
+              createdAt: comment.createdAt?.toDate ? comment.createdAt.toDate() : new Date(),
+            })),
+            isUpvoted: user ? (data.upvoters || []).includes(user.uid) : false,
           };
         });
-        
-        setBlogs(blogsData);
-      } catch (error) {
-        console.error('Error fetching blogs:', error);
-        toast.error('Failed to load blogs');
+        setBlogs(fetchedBlogs);
+      } catch (err) {
+        setError('Failed to load blogs.');
       } finally {
-        setIsLoading(false);
+        setLoading(false);
       }
     };
-
     fetchBlogs();
-  }, []);
+  }, [user]);
 
-  useEffect(() => {
-    let filtered = [...blogs];
-
-    // Apply search filter
-    if (searchTerm) {
-      filtered = filtered.filter(blog =>
-        blog.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        blog.content.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        blog.authorName.toLowerCase().includes(searchTerm.toLowerCase())
-      );
-    }
-
-    // Apply tag filter
-    if (selectedTag) {
-      filtered = filtered.filter(blog => blog.tags.includes(selectedTag));
-    }
-
-    // Apply sorting
-    filtered.sort((a, b) => {
-      switch (sortBy) {
-        case 'popular':
-          return b.upvotes - a.upvotes;
-        case 'trending':
-          // Simple trending algorithm: upvotes / days since creation
-          const aDays = Math.max(1, (Date.now() - a.createdAt.getTime()) / (1000 * 60 * 60 * 24));
-          const bDays = Math.max(1, (Date.now() - b.createdAt.getTime()) / (1000 * 60 * 60 * 24));
-          return (b.upvotes / bDays) - (a.upvotes / aDays);
-        case 'newest':
-        default:
-          return b.createdAt.getTime() - a.createdAt.getTime();
-      }
-    });
-
-    setFilteredBlogs(filtered);
-  }, [blogs, searchTerm, selectedTag, sortBy]);
-
-  const handleUpvote = async (blogId: string) => {
-    if (!user || !db) {
-      toast.error('Please login to upvote posts');
-      return;
-    }
-
-    if (isUpvoting) return;
-
-    setIsUpvoting(blogId);
+  const handleUpvote = async (postId: string) => {
+    if (!user) return;
+    setUpvotingId(postId);
     try {
-      const blogRef = doc(db, 'blogs', blogId);
-      const blog = blogs.find(b => b.id === blogId);
-      
+      const blog = blogs.find((b) => b.id === postId);
       if (!blog) return;
-
-      const isCurrentlyUpvoted = blog.isUpvoted;
-      
-      if (isCurrentlyUpvoted) {
-        // Remove upvote
+      const blogRef = doc(db, 'blogs', postId);
+      if (blog.isUpvoted) {
         await updateDoc(blogRef, {
           upvotes: blog.upvotes - 1,
-          upvoters: arrayRemove(user.uid)
+          upvoters: arrayRemove(user.uid),
         });
       } else {
-        // Add upvote
         await updateDoc(blogRef, {
           upvotes: blog.upvotes + 1,
-          upvoters: arrayUnion(user.uid)
+          upvoters: arrayUnion(user.uid),
         });
       }
-
-      // Update local state
-      setBlogs(prev => prev.map(b => 
-        b.id === blogId 
-          ? { 
-              ...b, 
-              upvotes: isCurrentlyUpvoted ? b.upvotes - 1 : b.upvotes + 1,
-              isUpvoted: !isCurrentlyUpvoted 
-            }
-          : b
-      ));
-
-      toast.success(isCurrentlyUpvoted ? 'Upvote removed' : 'Post upvoted!');
-    } catch (error) {
-      console.error('Error updating upvote:', error);
-      toast.error('Failed to update upvote');
+      // Optimistically update UI
+      setBlogs((prev) =>
+        prev.map((b) =>
+          b.id === postId
+            ? {
+                ...b,
+                upvotes: blog.isUpvoted ? b.upvotes - 1 : b.upvotes + 1,
+                isUpvoted: !b.isUpvoted,
+              }
+            : b
+        )
+      );
+    } catch (err) {
+      setError('Failed to update upvote.');
     } finally {
-      setIsUpvoting(null);
+      setUpvotingId(null);
     }
-  };
-
-  const clearFilters = () => {
-    setSearchTerm('');
-    setSelectedTag('');
-    setSortBy('newest');
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-50 to-pink-100">
-      {/* Header */}
-      <header className="bg-white shadow-sm border-b">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4">
-              <Link href="/dashboard" className="text-purple-600 hover:text-purple-800">
-                <ArrowLeft className="h-6 w-6" />
-              </Link>
-              <div className="flex items-center space-x-2">
-                <BookOpen className="h-8 w-8 text-purple-600" />
-                <span className="text-2xl font-bold text-gray-900">Community Blogs</span>
-              </div>
-            </div>
-            <div className="flex items-center space-x-2">
-              {user && (
-                <Button asChild>
-                  <Link href="/blogs/new">
-                    <Plus className="h-4 w-4 mr-2" />
-                    Write Post
-                  </Link>
-                </Button>
-              )}
-            </div>
+    <div className="min-h-screen bg-gradient-to-br from-purple-50 to-pink-100 pb-24">
+      <header className="bg-white shadow-sm border-b sticky top-0 z-10">
+        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
+          <div className="flex items-center space-x-2">
+            <BookOpen className="h-8 w-8 text-purple-600" />
+            <span className="text-2xl font-bold text-gray-900">Blogs</span>
           </div>
+          <Button asChild className="bg-purple-600 hover:bg-purple-700 hidden md:inline-flex">
+            <Link href="/blogs/new">
+              <Plus className="h-4 w-4 mr-2" /> Create Post
+            </Link>
+          </Button>
         </div>
       </header>
-
-      <main className="container mx-auto px-4 py-8">
-        {/* Stats Overview */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Posts</CardTitle>
-              <BookOpen className="h-4 w-4 text-purple-600" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{blogs.length}</div>
-              <p className="text-xs text-muted-foreground">Published articles</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Upvotes</CardTitle>
-              <Heart className="h-4 w-4 text-red-600" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">
-                {blogs.reduce((sum, blog) => sum + blog.upvotes, 0)}
-              </div>
-              <p className="text-xs text-muted-foreground">Community appreciation</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Active Tags</CardTitle>
-              <Tag className="h-4 w-4 text-blue-600" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{allTags.length}</div>
-              <p className="text-xs text-muted-foreground">Different topics</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Comments</CardTitle>
-              <PenTool className="h-4 w-4 text-green-600" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">
-                {blogs.reduce((sum, blog) => sum + blog.comments.length, 0)}
-              </div>
-              <p className="text-xs text-muted-foreground">Community discussions</p>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Filters and Search */}
-        <Card className="mb-8">
-          <CardHeader>
-            <CardTitle className="flex items-center space-x-2">
-              <Filter className="h-5 w-5" />
-              <span>Filter & Search</span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
-              {/* Search */}
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                <Input
-                  placeholder="Search posts..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10"
-                />
-              </div>
-
-              {/* Tag Filter */}
-              <select
-                value={selectedTag}
-                onChange={(e) => setSelectedTag(e.target.value)}
-                className="px-3 py-2 border border-input bg-background rounded-md text-sm"
-              >
-                <option value="">All Tags</option>
-                {allTags.map(tag => (
-                  <option key={tag} value={tag}>{tag}</option>
-                ))}
-              </select>
-
-              {/* Sort */}
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value as 'newest' | 'popular' | 'trending')}
-                className="px-3 py-2 border border-input bg-background rounded-md text-sm"
-              >
-                <option value="newest">
-                  <Clock className="inline h-4 w-4 mr-1" />
-                  Newest First
-                </option>
-                <option value="popular">
-                  <Heart className="inline h-4 w-4 mr-1" />
-                  Most Popular
-                </option>
-                <option value="trending">
-                  <TrendingUp className="inline h-4 w-4 mr-1" />
-                  Trending
-                </option>
-              </select>
-
-              {/* Clear Filters */}
-              <Button variant="outline" onClick={clearFilters}>
-                Clear Filters
+      <main className="container mx-auto px-4 py-8 grid grid-cols-1 md:grid-cols-12 gap-8">
+        {/* Blog Feed Section */}
+        <section className="md:col-span-8 flex flex-col gap-8">
+          <div className="mb-2">
+            <h1 className="text-3xl font-bold text-purple-800 flex items-center gap-2">
+              <FileText className="h-7 w-7 text-purple-400" /> Campus Blog Feed
+            </h1>
+            <p className="text-gray-600 mt-1 ml-1">Read and share coding stories, tutorials, and experiences from your campus community.</p>
+          </div>
+          {loading ? (
+            <div className="flex flex-col items-center justify-center py-16 text-gray-500">
+              <Loader2 className="h-10 w-10 animate-spin mb-4 text-purple-400" />
+              <span className="text-lg">Loading blogs...</span>
+            </div>
+          ) : error ? (
+            <div className="flex flex-col items-center justify-center py-16 text-red-500">
+              <AlertTriangle className="h-10 w-10 mb-4" />
+              <span className="text-lg">{error}</span>
+            </div>
+          ) : blogs.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-24 text-gray-500">
+              <Lightbulb className="h-14 w-14 mb-4 text-yellow-400" />
+              <h2 className="text-xl font-semibold mb-2">No blog posts yet</h2>
+              <p className="mb-4">Be the first to share your coding journey or tips with the community!</p>
+              <Button asChild className="bg-purple-600 hover:bg-purple-700">
+                <Link href="/blogs/new">
+                  <Plus className="h-4 w-4 mr-2" /> Create Your First Post
+                </Link>
               </Button>
             </div>
-
-            {/* Active Filters Display */}
-            {(searchTerm || selectedTag || sortBy !== 'newest') && (
-              <div className="flex flex-wrap gap-2">
-                {searchTerm && (
-                  <Badge variant="secondary">
-                    Search: &quot;{searchTerm}&quot;
-                  </Badge>
-                )}
-                {selectedTag && (
-                  <Badge variant="secondary">
-                    Tag: {selectedTag}
-                  </Badge>
-                )}
-                {sortBy !== 'newest' && (
-                  <Badge variant="secondary">
-                    Sort: {sortBy}
-                  </Badge>
-                )}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Blog Posts */}
-        {isLoading ? (
-          <div className="space-y-6">
-            {Array.from({ length: 5 }).map((_, i) => (
-              <Card key={i}>
-                <CardHeader>
-                  <Skeleton className="h-6 w-3/4" />
-                  <Skeleton className="h-4 w-1/2" />
-                </CardHeader>
-                <CardContent>
-                  <Skeleton className="h-20 w-full mb-4" />
-                  <div className="flex space-x-2">
-                    <Skeleton className="h-6 w-16" />
-                    <Skeleton className="h-6 w-16" />
-                    <Skeleton className="h-6 w-16" />
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
+          ) : (
+            <div className="flex flex-col gap-6 animate-fade-in">
+              {blogs.map((blog, i) => (
+                <div key={blog.id} style={{ animationDelay: `${i * 60}ms` }} className="animate-fade-in-up">
+                  <BlogCard
+                    post={blog}
+                    onUpvote={handleUpvote}
+                    isUpvoting={upvotingId === blog.id}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+        {/* Right Sidebar for Desktop */}
+        <aside className="hidden md:block md:col-span-4 space-y-8">
+          <div className="bg-white rounded-2xl shadow-md border p-6 sticky top-24">
+            <h2 className="text-lg font-semibold mb-2 flex items-center gap-2">
+              <Lightbulb className="h-5 w-5 text-yellow-400" /> Tips for Great Blog Posts
+            </h2>
+            <ul className="list-disc list-inside text-gray-700 space-y-1 text-sm">
+              <li>Share your coding journey, not just solutions.</li>
+              <li>Use code snippets and visuals for clarity.</li>
+              <li>Ask questions to engage readers.</li>
+              <li>Tag your post for discoverability.</li>
+              <li>Be kind and constructive in comments.</li>
+            </ul>
           </div>
-        ) : filteredBlogs.length > 0 ? (
-          <div className="space-y-6">
-            {filteredBlogs.map((blog) => (
-              <BlogCard
-                key={blog.id}
-                post={blog}
-                onUpvote={handleUpvote}
-                isUpvoting={isUpvoting === blog.id}
-              />
-            ))}
+          <div className="bg-gradient-to-r from-purple-100 to-pink-100 rounded-2xl shadow border p-6">
+            <h2 className="text-lg font-semibold mb-2">🚀 Why Blog?</h2>
+            <p className="text-gray-700 text-sm mb-2">Blogging helps you reflect, build your portfolio, and connect with other coders. Start sharing today!</p>
+            <Button asChild className="w-full bg-purple-600 hover:bg-purple-700 mt-2">
+              <Link href="/blogs/new">
+                <Plus className="h-4 w-4 mr-2" /> Write a Post
+              </Link>
+            </Button>
           </div>
-        ) : (
-          <Card>
-            <CardContent className="text-center py-12">
-              <BookOpen className="h-16 w-16 text-gray-400 mx-auto mb-4" />
-              <h3 className="text-xl font-semibold text-gray-600 mb-2">
-                {searchTerm || selectedTag ? 'No posts found' : 'No blog posts yet'}
-              </h3>
-              <p className="text-gray-500 mb-4">
-                {searchTerm || selectedTag 
-                  ? 'Try adjusting your search criteria or filters'
-                  : 'Be the first to share your thoughts with the community!'
-                }
-              </p>
-              {user && (
-                <Button asChild>
-                  <Link href="/blogs/new">
-                    <PenTool className="h-4 w-4 mr-2" />
-                    Write First Post
-                  </Link>
-                </Button>
-              )}
-            </CardContent>
-          </Card>
-        )}
+        </aside>
+        {/* Floating Create Button for Mobile */}
+        <Button asChild className="fixed bottom-6 right-6 z-20 rounded-full p-0 h-14 w-14 shadow-lg bg-purple-600 hover:bg-purple-700 md:hidden flex items-center justify-center">
+          <Link href="/blogs/new">
+            <Plus className="h-7 w-7" />
+            <span className="sr-only">Create Post</span>
+          </Link>
+        </Button>
       </main>
+      {/* Animations */}
+      <style jsx global>{`
+        @keyframes fade-in-up {
+          0% { opacity: 0; transform: translateY(24px); }
+          100% { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade-in-up {
+          animation: fade-in-up 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+        }
+        @keyframes fade-in {
+          0% { opacity: 0; }
+          100% { opacity: 1; }
+        }
+        .animate-fade-in {
+          animation: fade-in 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+        }
+      `}</style>
     </div>
   );
 } 

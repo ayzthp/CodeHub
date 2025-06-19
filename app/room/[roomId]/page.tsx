@@ -1,293 +1,233 @@
-"use client";
+'use client';
 
-import { useState, useEffect } from "react";
-import { useParams, useRouter } from "next/navigation";
-import { doc, onSnapshot, updateDoc, serverTimestamp } from "firebase/firestore";
-import { db } from "@/lib/firebase";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { 
-  ArrowLeft, 
-  Crown, 
-  Loader2
-} from "lucide-react";
-import Link from "next/link";
-
-interface Participant {
-  uid: string;
-  name: string;
-  isHost: boolean;
-  hasWriteAccess: boolean;
-  isMuted: boolean;
-  isTyping: boolean;
-  lastSeen: unknown;
-}
+import { useEffect, useState } from 'react';
+import { useParams } from 'next/navigation';
+import { useAuth } from '@/hooks/useAuth';
+import { db } from '@/lib/firebase';
+import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { toast } from 'sonner';
+import Link from 'next/link';
+import { ArrowLeft, Copy, Share } from 'lucide-react';
+import ProtectedRoute from '@/components/ProtectedRoute';
+import SharedCodeEditor from './codepad';
+import RightSidebar from '@/components/room/RightSidebar';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import Whiteboard from '@/components/Whiteboard';
+import { RoomProvider } from '@liveblocks/react';
+import LiveblocksWrapper from '@/components/LiveblocksWrapper';
 
 interface RoomData {
   id: string;
-  name: string;
+  title: string;
+  description: string;
   hostId: string;
-  participants: Participant[];
-  code: string;
-  language: string;
+  hostName: string;
   createdAt: unknown;
-  updatedAt: unknown;
+  isPublic: boolean;
+  maxParticipants: number;
+  currentEditor: string;
+  participants: Record<string, {
+    name: string;
+    email: string;
+    joinedAt: unknown;
+    role: string;
+  }>;
 }
 
 export default function RoomPage() {
+  const { user } = useAuth();
   const params = useParams();
-  const router = useRouter();
-  const roomId = params.roomId as string;
+  const roomId = params?.roomId as string || "";
   
   const [roomData, setRoomData] = useState<RoomData | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [code, setCode] = useState("");
-  const [language, setLanguage] = useState("javascript");
+  const [roomLoading, setRoomLoading] = useState(true);
+  const [roomError, setRoomError] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [output, setOutput] = useState("");
-  const [isRunning, setIsRunning] = useState(false);
+  const [activeTab, setActiveTab] = useState<'code' | 'whiteboard'>('code');
 
   useEffect(() => {
-    if (!roomId || !db) return;
+    if (!user || !roomId) return;
 
-    const unsubscribe = onSnapshot(doc(db, "rooms", roomId), (doc) => {
+    console.log('Loading room:', roomId);
+    
+    const roomRef = doc(db, 'rooms', roomId);
+    
+    const unsubscribe = onSnapshot(roomRef, (doc) => {
       if (doc.exists()) {
         const data = doc.data() as RoomData;
+        console.log('Room data found:', data);
         setRoomData(data);
-        setCode(data.code || "");
-        setLanguage(data.language || "javascript");
-        setIsLoading(false);
+        
+        // Add current user to participants if not already present
+        if (!data.participants[user.uid]) {
+          updateDoc(roomRef, {
+            [`participants.${user.uid}`]: {
+              name: user.displayName || user.email || 'Anonymous',
+              email: user.email || '',
+              joinedAt: new Date(),
+              role: 'participant'
+            }
+          }).catch((error) => {
+            console.error('Error joining room:', error);
+          });
+        }
       } else {
-        router.push("/dashboard");
+        console.log('Room not found');
+        setRoomError('Room not found');
       }
+      setRoomLoading(false);
+    }, (error) => {
+      console.error('Firestore error:', error);
+      setRoomError('Error loading room');
+      setRoomLoading(false);
     });
 
     return () => unsubscribe();
-  }, [roomId, router]);
+  }, [user, roomId]);
 
-  const updateCode = async (newCode: string) => {
-    if (!roomId || !db) return;
-
-    try {
-      await updateDoc(doc(db, "rooms", roomId), {
-        code: newCode,
-        updatedAt: serverTimestamp(),
-      });
-    } catch (error) {
-      console.error("Error updating code:", error);
-    }
+  const copyRoomLink = () => {
+    const roomLink = `${window.location.origin}/room/${roomId}`;
+    navigator.clipboard.writeText(roomLink);
+    toast.success('Room link copied to clipboard!');
   };
 
-  const updateLanguage = async (newLanguage: string) => {
-    if (!roomId || !db) return;
-
-    try {
-      await updateDoc(doc(db, "rooms", roomId), {
-        language: newLanguage,
-        updatedAt: serverTimestamp(),
-      });
-    } catch (error) {
-      console.error("Error updating language:", error);
-    }
-  };
-
-  const runCode = async () => {
-    if (!code.trim()) return;
-
-    setIsRunning(true);
-    setOutput("Running...");
-
-    try {
-      const response = await fetch("/api/run", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          source_code: code,
-          language_id: getLanguageId(language),
-          stdin: input,
-        }),
-      });
-
-      const result = await response.json();
-
-      if (result.success) {
-        setOutput(result.output || "No output");
-      } else {
-        setOutput(`Error: ${result.error}`);
+  const shareRoom = async () => {
+    const roomLink = `${window.location.origin}/room/${roomId}`;
+    
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: roomData?.title || 'Join my room',
+          text: roomData?.description || 'Join this collaboration room',
+          url: roomLink,
+        });
+      } catch {
+        copyRoomLink();
       }
-    } catch {
-      setOutput("Error: Failed to execute code");
-    } finally {
-      setIsRunning(false);
+    } else {
+      copyRoomLink();
     }
   };
 
-  const getLanguageId = (lang: string): number => {
-    const languageMap: Record<string, number> = {
-      javascript: 63,
-      python: 71,
-      java: 62,
-      cpp: 54,
-      c: 50,
-    };
-    return languageMap[lang] || 63;
-  };
-
-  if (isLoading) {
+  if (roomLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin" />
-      </div>
-    );
-  }
-
-  if (!roomData) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <h2 className="text-2xl font-bold mb-4">Room not found</h2>
-          <Button asChild>
-            <Link href="/dashboard">Back to Dashboard</Link>
-          </Button>
+      <ProtectedRoute>
+        <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600 mx-auto mb-4"></div>
+            <p className="text-lg text-gray-600">Loading room...</p>
+          </div>
         </div>
-      </div>
+      </ProtectedRoute>
     );
   }
 
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
-      {/* Header */}
-      <header className="bg-white shadow-sm border-b">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex justify-between items-center">
-            <div className="flex items-center space-x-4">
-              <Button asChild variant="ghost" size="sm">
+  if (roomError || !roomData) {
+    return (
+      <ProtectedRoute>
+        <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
+          <Card className="max-w-md mx-auto">
+            <CardHeader>
+              <CardTitle className="text-center text-red-600">Room Not Found</CardTitle>
+            </CardHeader>
+            <CardContent className="text-center">
+              <p className="text-gray-600 mb-4">This room doesn&apos;t exist or has been deleted</p>
+              <Button asChild>
                 <Link href="/dashboard">
                   <ArrowLeft className="h-4 w-4 mr-2" />
                   Back to Dashboard
                 </Link>
               </Button>
-              <div>
-                <h1 className="text-xl font-bold text-gray-900">{roomData.name}</h1>
-                <p className="text-sm text-gray-500">Collaborative coding room</p>
+            </CardContent>
+          </Card>
+        </div>
+      </ProtectedRoute>
+    );
+  }
+
+  const isHost = user?.uid === roomData.hostId;
+  const participantCount = Object.keys(roomData.participants).length;
+
+  return (
+    <ProtectedRoute>
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
+        {/* Header */}
+        <header className="bg-white shadow-sm border-b">
+          <div className="container mx-auto px-4 py-4">
+            <div className="flex justify-between items-center">
+              <div className="flex items-center space-x-4">
+                <Button asChild variant="ghost" size="sm">
+                  <Link href="/dashboard">
+                    <ArrowLeft className="h-4 w-4 mr-2" />
+                    Back to Dashboard
+                  </Link>
+                </Button>
+                <div>
+                  <h1 className="text-xl font-bold text-gray-900">{roomData.title}</h1>
+                  <p className="text-sm text-gray-500">
+                    {participantCount} participant{participantCount !== 1 ? 's' : ''} • 
+                    Host: {roomData.hostName}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center space-x-2">
+                <Button onClick={shareRoom} variant="outline" size="sm">
+                  <Share className="h-4 w-4 mr-2" />
+                  Share
+                </Button>
+                <Button onClick={copyRoomLink} variant="outline" size="sm">
+                  <Copy className="h-4 w-4 mr-2" />
+                  Copy Link
+                </Button>
               </div>
             </div>
-            <div className="flex items-center space-x-2">
-              <Badge variant="outline">
-                {roomData.participants.length} participants
-              </Badge>
-            </div>
           </div>
-        </div>
-      </header>
+        </header>
 
-      {/* Main Content */}
-      <main className="container mx-auto px-4 py-8">
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-          {/* Code Editor - 3/5 width */}
-          <div className="lg:col-span-3">
-            <Card className="h-full">
-              <CardHeader>
-                <CardTitle className="flex items-center justify-between">
-                  <span>Code Editor</span>
-                  <div className="flex items-center space-x-2">
-                    <select
-                      value={language}
-                      onChange={(e) => updateLanguage(e.target.value)}
-                      className="px-2 py-1 text-sm border rounded"
-                    >
-                      <option value="javascript">JavaScript</option>
-                      <option value="python">Python</option>
-                      <option value="java">Java</option>
-                      <option value="cpp">C++</option>
-                      <option value="c">C</option>
-                    </select>
-                  </div>
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <textarea
-                  value={code}
-                  onChange={(e) => updateCode(e.target.value)}
-                  className="w-full h-96 p-4 font-mono text-sm bg-gray-50 border rounded resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Start coding here..."
+        {/* Main Content - Full height layout */}
+        <main className="h-[calc(100vh-80px)] flex">
+          <LiveblocksWrapper>
+            <RoomProvider id={roomId}>
+              <div className="flex-1 p-4 flex flex-col">
+                <Tabs value={activeTab} onValueChange={v => setActiveTab(v as 'code' | 'whiteboard')} className="mb-4">
+                  <TabsList>
+                    <TabsTrigger value="code">Code</TabsTrigger>
+                    <TabsTrigger value="whiteboard">Whiteboard</TabsTrigger>
+                  </TabsList>
+                  <TabsContent value="code">
+                    <SharedCodeEditor 
+                      roomId={roomId} 
+                      input={input}
+                      setInput={setInput}
+                      output={output}
+                      setOutput={setOutput}
+                    />
+                  </TabsContent>
+                  <TabsContent value="whiteboard">
+                    <Whiteboard isHost={isHost} />
+                  </TabsContent>
+                </Tabs>
+              </div>
+
+              {/* Right Side - Controls and I/O (Fixed width) */}
+              <div className="w-96 bg-white border-l border-gray-200 p-4 overflow-y-auto">
+                <RightSidebar 
+                  roomId={roomId} 
+                  roomData={roomData} 
+                  isHost={isHost}
+                  input={input}
+                  setInput={setInput}
+                  output={output}
+                  setOutput={setOutput}
                 />
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Sidebar - 2/5 width */}
-          <div className="lg:col-span-2 space-y-6">
-            {/* Input/Output Panel */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Input/Output</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div>
-                  <label className="text-sm font-medium">Input:</label>
-                  <textarea
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    className="w-full h-20 p-2 text-sm border rounded resize-none"
-                    placeholder="Enter input here..."
-                  />
-                </div>
-                <div>
-                  <label className="text-sm font-medium">Output:</label>
-                  <textarea
-                    value={output}
-                    readOnly
-                    className="w-full h-32 p-2 text-sm border rounded resize-none bg-gray-50"
-                    placeholder="Output will appear here..."
-                  />
-                </div>
-                <Button
-                  onClick={runCode}
-                  disabled={isRunning}
-                  className="w-full"
-                >
-                  {isRunning ? (
-                    <>
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      Running...
-                    </>
-                  ) : (
-                    "Run Code"
-                  )}
-                </Button>
-              </CardContent>
-            </Card>
-
-            {/* Participants */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Participants</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2">
-                  {roomData.participants.map((participant) => (
-                    <div key={participant.uid} className="flex items-center justify-between">
-                      <div className="flex items-center space-x-2">
-                        <span className="text-sm">{participant.name}</span>
-                        {participant.isHost && <Crown className="h-3 w-3 text-yellow-500" />}
-                        {participant.hasWriteAccess && (
-                          <Badge variant="default" className="text-xs">
-                            Writing
-                          </Badge>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        </div>
-      </main>
-    </div>
+              </div>
+            </RoomProvider>
+          </LiveblocksWrapper>
+        </main>
+      </div>
+    </ProtectedRoute>
   );
 } 

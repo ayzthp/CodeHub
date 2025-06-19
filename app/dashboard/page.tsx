@@ -14,7 +14,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { Code, LogOut, RefreshCw, Trophy, GitBranch, Target, Zap, Award, Users, TrendingUp, BookOpen, Palette } from 'lucide-react';
+import { Code, LogOut, RefreshCw, Trophy, GitBranch, Target, Zap, Award, Users, TrendingUp, BookOpen } from 'lucide-react';
 import Link from 'next/link';
 
 interface UserData {
@@ -78,23 +78,22 @@ interface UserData {
 
 export default function DashboardPage() {
   const { user } = useAuth();
+  const router = useRouter();
   const [userData, setUserData] = useState<UserData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
-  const router = useRouter();
 
   useEffect(() => {
     const fetchUserData = async () => {
-      if (!user || !db) return;
+      if (!user) return;
       
       try {
         const userDoc = await getDoc(doc(db, 'users', user.uid));
         if (userDoc.exists()) {
-          const userData = userDoc.data() as UserData;
-          setUserData(userData);
+          setUserData(userDoc.data() as UserData);
         }
-      } catch (error) {
-        console.error('Error fetching user data:', error);
+      } catch {
+        toast.error('Failed to load user data');
       } finally {
         setIsLoading(false);
       }
@@ -104,7 +103,6 @@ export default function DashboardPage() {
   }, [user]);
 
   const handleLogout = async () => {
-    if (!auth) return;
     try {
       await signOut(auth);
       toast.success('Logged out successfully');
@@ -115,7 +113,7 @@ export default function DashboardPage() {
   };
 
   const handleSync = async () => {
-    if (!user || !userData || !db) return;
+    if (!user || !userData) return;
 
     setIsSyncing(true);
     try {
@@ -208,12 +206,6 @@ export default function DashboardPage() {
                   <Link href="/room/new">
                     <Users className="h-4 w-4 mr-2" />
                     Create Room
-                  </Link>
-                </Button>
-                <Button asChild variant="outline" size="sm">
-                  <Link href="/whiteboard">
-                    <Palette className="h-4 w-4 mr-2" />
-                    Whiteboard
                   </Link>
                 </Button>
                 <Button asChild variant="outline" size="sm">

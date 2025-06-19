@@ -14,7 +14,7 @@ import { useParams } from 'next/navigation';
 
 export default function CollegeLeaderboardPage() {
   const params = useParams();
-  const college = decodeURIComponent(params.college as string);
+  const college = decodeURIComponent(params?.college as string || "");
   
   const [users, setUsers] = useState<LeaderboardUser[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -26,15 +26,12 @@ export default function CollegeLeaderboardPage() {
   });
 
   useEffect(() => {
-    if (college && db) {
+    if (college) {
       fetchCollegeUsers();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [college]);
+  }, [college]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchCollegeUsers = async () => {
-    if (!college || !db) return;
-    
     setIsLoading(true);
     try {
       const usersRef = collection(db, 'users');

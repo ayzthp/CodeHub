@@ -11,9 +11,6 @@ import { ArrowLeft, BookOpen } from 'lucide-react';
 import Link from 'next/link';
 import { toast } from 'sonner';
 
-// Prevent static generation
-export const dynamic = 'force-dynamic';
-
 export default function NewBlogPage() {
   const router = useRouter();
   const { user } = useAuth();
@@ -47,11 +44,6 @@ export default function NewBlogPage() {
     setIsSubmitting(true);
     
     try {
-      // Check if Firebase is available
-      if (!db) {
-        throw new Error('Firebase is not initialized');
-      }
-
       // Create the blog post in Firestore
       const blogData = {
         title: data.title,
